@@ -113,6 +113,26 @@ input[type="datetime-local"],
   font-family: var(--mono);
 }
 .hint { margin: 6px 0 0; font-size: 11.5px; color: var(--sub); }
+.actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 16px; }
+button { border: 0; border-radius: 11px; padding: 12px 14px; font: 600 13px var(--sans); cursor: pointer; }
+.primary { color: #fff; background: var(--red); }
+.secondary { color: var(--ink); background: var(--field); border: 1px solid var(--line); }
+button:disabled { opacity: .45; cursor: not-allowed; }
+.section { margin-top: 28px; padding-top: 20px; border-top: 1px solid var(--line); }
+.section-head { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; margin-bottom: 12px; }
+.section h2 { margin: 0; font-size: 15px; }
+.section-note { margin: 0; color: var(--sub); font-size: 11.5px; }
+.summary { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.metric { background: var(--field); border-radius: 11px; padding: 11px 12px; }
+.metric-label { color: var(--sub); font-size: 11.5px; }
+.metric-value { margin-top: 4px; font: 600 17px var(--mono); }
+.history { display: grid; gap: 8px; margin-top: 12px; }
+.history-item { display: flex; justify-content: space-between; gap: 10px; padding: 11px 12px; border: 1px solid var(--line); border-radius: 11px; font-size: 12.5px; }
+.history-main { min-width: 0; }
+.history-country { font-weight: 600; }
+.history-meta { margin-top: 4px; color: var(--sub); font-size: 11px; }
+.history-total { white-space: nowrap; text-align: right; font: 600 13px var(--mono); }
+.history-empty { color: var(--sub); font-size: 12.5px; padding: 10px 0; }
 .breakdown {
   margin-top: 20px; padding: 14px;
   background: var(--field);
@@ -222,8 +242,26 @@ input:focus-visible, select:focus-visible {
     </div>
   </div>
 
+  <div class="actions">
+    <button class="primary" id="saveBtn" type="button" disabled>Görevi kaydet</button>
+    <button class="secondary" id="clearBtn" type="button">Alanları temizle</button>
+  </div>
+
   <!-- Sonuç alanı -->
   <div id="output"></div>
+
+  <section class="section" aria-labelledby="historyTitle">
+    <div class="section-head">
+      <h2 id="historyTitle">Kayıtlı görevler</h2>
+      <p class="section-note" id="recordCount">0 görev</p>
+    </div>
+    <div class="summary" id="summary"></div>
+    <div class="actions">
+      <button class="secondary" id="exportBtn" type="button">CSV indir</button>
+      <button class="secondary" id="clearHistoryBtn" type="button">Kayıtları temizle</button>
+    </div>
+    <div class="history" id="history"></div>
+  </section>
 
 </div>
 
@@ -276,7 +314,27 @@ var elChip     = document.getElementById("rateChip");
 var elArrival  = document.getElementById("arrivalInput");
 var elDepart   = document.getElementById("departureInput");
 var elOut      = document.getElementById("output");
+var elSave     = document.getElementById("saveBtn");
+var elClear    = document.getElementById("clearBtn");
+var elSummary  = document.getElementById("summary");
+var elHistory  = document.getElementById("history");
+var elCount    = document.getElementById("recordCount");
+var elExport   = document.getElementById("exportBtn");
+var elClearHistory = document.getElementById("clearHistoryBtn");
 var tryRate    = "";
+var STORAGE_KEY = "harcirahtk-gorevler-v1";
+var records = loadRecords();
+
+function loadRecords() {
+  try {
+    var saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || "[]");
+    return Array.isArray(saved) ? saved : [];
+  } catch (e) { return []; }
+}
+
+function saveRecords() {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(records));
+}
 
 COUNTRIES.forEach(function(c, i) {
   var o = document.createElement("option");
@@ -296,6 +354,7 @@ function render() {
   var dv = elDepart.value;
 
   if (!av || !dv) {
+    elSave.disabled = true;
     elOut.innerHTML = '<div class="empty">Ülke ve saatleri gir, harcırahı hesaplayalım.</div>';
     return;
   }
@@ -304,11 +363,13 @@ function render() {
   var y = new Date(dv).getTime();
 
   if (isNaN(x) || isNaN(y)) {
+    elSave.disabled = true;
     elOut.innerHTML = '<div class="empty">Ülke ve saatleri gir, harcırahı hesaplayalım.</div>';
     return;
   }
 
   if (y <= x) {
+    elSave.disabled = true;
     elOut.innerHTML = '<div class="warn">Dönüş zamanı varıştan önce görünüyor. Saatleri kontrol et.</div>';
     return;
   }
@@ -321,6 +382,7 @@ function render() {
     '<div class="brow"><span class="k">İstirahat düşümü</span><span class="v">− '   + fmtDur(REST_MIN)    + '</span></div>';
 
   if (netMin <= 0) {
+    elSave.disabled = true;
     html += '</div><div class="warn">Net konaklama 1.5 saatin altında — harcırah oluşmayabilir. Saatleri kontrol et.</div>';
     elOut.innerHTML = html;
     return;
@@ -361,6 +423,7 @@ function render() {
     '</div>';
 
   elOut.innerHTML = html;
+  elSave.disabled = false;
 
   var kurEl = document.getElementById("kurInput");
   if (kurEl) {
@@ -373,10 +436,72 @@ function render() {
   }
 }
 
+function renderHistory() {
+  var count = records.length;
+  elCount.textContent = count + (count === 1 ? " görev" : " görev");
+  if (!count) {
+    elSummary.innerHTML = '<div class="metric"><div class="metric-label">Toplam birim</div><div class="metric-value">0</div></div><div class="metric"><div class="metric-label">Toplam döviz</div><div class="metric-value">0</div></div>';
+    elHistory.innerHTML = '<div class="history-empty">Kaydettiğin görevler burada görünecek.</div>';
+    return;
+  }
+  var totalUnits = records.reduce(function(s, r) { return s + r.units; }, 0);
+  var currencies = {};
+  records.forEach(function(r) { currencies[r.code] = (currencies[r.code] || 0) + r.total; });
+  var money = Object.keys(currencies).map(function(code) { return nf.format(currencies[code]) + " " + code; }).join(" + ");
+  var tlTotal = records.reduce(function(s, r) { return s + (Number(r.tlTotal) || 0); }, 0);
+  var nights = records.reduce(function(s, r) { return s + r.netMin; }, 0);
+  elSummary.innerHTML = '<div class="metric"><div class="metric-label">Toplam birim</div><div class="metric-value">' + nf.format(totalUnits) + '</div></div>' +
+    '<div class="metric"><div class="metric-label">Toplam döviz</div><div class="metric-value">' + money + '</div></div>' +
+    '<div class="metric"><div class="metric-label">Girilen kurlarla TL</div><div class="metric-value">' + (tlTotal ? nf2.format(tlTotal) + ' TL' : '—') + '</div></div>' +
+    '<div class="metric"><div class="metric-label">Net konaklama</div><div class="metric-value">' + fmtDur(nights) + '</div></div>' +
+    '<div class="metric"><div class="metric-label">Ortalama görev</div><div class="metric-value">' + nf2.format(totalUnits / count) + ' birim</div></div>';
+  elHistory.innerHTML = records.slice().reverse().map(function(r, index) {
+    var original = records.length - 1 - index;
+    var date = new Date(r.arrival).toLocaleDateString("tr-TR");
+    return '<div class="history-item"><div class="history-main"><div class="history-country">' + r.country + '</div><div class="history-meta">' + date + ' · ' + r.units + ' birim · ' + fmtDur(r.netMin) + '</div></div><div class="history-total">' + nf.format(r.total) + ' ' + r.code + '<br><button class="secondary delete-record" data-index="' + original + '" type="button">Sil</button></div></div>';
+  }).join("");
+  document.querySelectorAll(".delete-record").forEach(function(btn) {
+    btn.addEventListener("click", function() {
+      records.splice(+btn.dataset.index, 1); saveRecords(); renderHistory();
+    });
+  });
+}
+
+elSave.addEventListener("click", function() {
+  var c = COUNTRIES[+elCountry.value];
+  var x = new Date(elArrival.value).getTime();
+  var y = new Date(elDepart.value).getTime();
+  var netMin = Math.round((y - x) / 60000) - REST_MIN;
+  var units = Math.floor(netMin / 1440) + 1;
+  var rateToTry = parseFloat(String(tryRate).replace(",", "."));
+  records.push({ country:c.name, code:c.code, arrival:elArrival.value, netMin:netMin, units:units, total:units*c.rate, tlTotal:rateToTry > 0 ? units*c.rate*rateToTry : 0 });
+  saveRecords(); renderHistory();
+  elSave.textContent = "Kaydedildi ✓";
+  setTimeout(function() { elSave.textContent = "Görevi kaydet"; }, 1200);
+});
+
+elClear.addEventListener("click", function() { elArrival.value = ""; elDepart.value = ""; tryRate = ""; render(); });
+
+elExport.addEventListener("click", function() {
+  if (!records.length) return;
+  var rows = [["Ülke", "Tarih", "Para birimi", "Net konaklama (dk)", "Birim", "Toplam", "TL karşılığı"]];
+  records.forEach(function(r) { rows.push([r.country, new Date(r.arrival).toLocaleDateString("tr-TR"), r.code, r.netMin, r.units, r.total, r.tlTotal || ""]); });
+  var csv = rows.map(function(row) { return row.map(function(v) { return '"' + String(v).replace(/"/g, '""') + '"'; }).join(";"); }).join("\n");
+  var blob = new Blob(["\uFEFF" + csv], {type:"text/csv;charset=utf-8;"});
+  var a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = "harcirah-kayitlari.csv"; a.click();
+  URL.revokeObjectURL(a.href);
+});
+
+elClearHistory.addEventListener("click", function() {
+  if (!records.length || !confirm("Tüm kayıtlı görevler silinsin mi?")) return;
+  records = []; saveRecords(); renderHistory();
+});
+
 elCountry.addEventListener("change", render);
 elArrival.addEventListener("input", render);
 elDepart.addEventListener("input", render);
 render();
+renderHistory();
 </script>
 </body>
 </html>
